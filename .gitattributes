@@ -1,0 +1,16 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python files
+*.py text eol=lf
+
+# Markdown files
+*.md text eol=lf
+
+# CSV files
+*.csv text eol=lf
+
+# Config files
+*.toml text eol=lf
+*.ini text eol=lf
+
