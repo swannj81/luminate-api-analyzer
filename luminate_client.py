@@ -157,7 +157,12 @@ class LuminateAPIClient:
             params['start_date'] = kwargs['start_date']
         if 'end_date' in kwargs and kwargs.get('end_date'):
             params['end_date'] = kwargs['end_date']
+        
+        # Track if location filter is being used
+        # Location filter may prevent DMA/commercial_model breakdowns from being returned
+        request_with_location = False
         if 'location' in kwargs and kwargs.get('location'):
+            request_with_location = True
             params['location'] = kwargs['location']
         
         try:
