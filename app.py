@@ -139,21 +139,25 @@ def fetch_isrc_data(isrcs: List[str], progress_bar, status_text,
             
             # Log errors to error log
             if data is None:
-                error_msg = f"No data returned (204 or error) - data may exist on web"
+                # None means actual error (404, 500, etc.)
+                error_msg = f"Error fetching data (404, 500, or other error)"
                 errors.append(f"{isrc}: {error_msg}")
-                # Log to error log
                 st.session_state.error_log.append({
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'type': '204 No Content',
+                    'type': 'API Error',
                     'isrc': isrc,
                     'message': error_msg,
                     'details': {
                         'start_date': start_date,
                         'end_date': end_date,
-                        'location': location,
-                        'note': 'Data exists on web but API returned 204. Check date range or location filter.'
+                        'location': location
                     }
                 })
+            elif isinstance(data, dict) and len(data) == 0:
+                # Empty dict means 204 - ISRC found but no data for this period
+                # This is valid, not an error - just no data for the requested time period
+                # Don't log as error, but note it
+                pass  # 204 is valid - ISRC exists but no data for this period
             elif not isinstance(data, dict):
                 error_msg = f"Unexpected data type: {type(data)}"
                 errors.append(f"{isrc}: {error_msg}")
@@ -235,6 +239,14 @@ def main():
     # Sidebar for configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
+        
+        # Logout button
+        if st.button("🚪 Logout"):
+            st.session_state.authenticated = False
+            st.session_state.api_client = None
+            st.rerun()
+        
+        st.markdown("---")
         
         # API Status
         if st.session_state.api_client:
@@ -410,21 +422,35 @@ def main():
                     status_text.text("Analyzing data for manipulation indicators...")
                     
                     # Debug: Check API responses
-                    successful_fetches = sum(1 for v in api_data.values() if v is not None)
-                    failed_fetches = len(api_data) - successful_fetches
+                    # Count successful (has data), no data (204 - empty dict), and errors (None)
+                    successful_fetches = sum(1 for v in api_data.values() if v is not None and len(v) > 0)
+                    no_data_fetches = sum(1 for v in api_data.values() if isinstance(v, dict) and len(v) == 0)
+                    failed_fetches = sum(1 for v in api_data.values() if v is None)
                     
                     # Always show debug panel
                     st.markdown("### 🔍 Debug Information")
                     
                     # Show fetch statistics
-                    col1, col2 = st.columns(2)
+                    col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("✅ Successful Fetches", successful_fetches)
+                        st.metric("✅ With Data", successful_fetches)
                     with col2:
-                        st.metric("❌ Failed Fetches", failed_fetches)
+                        st.metric("ℹ️ No Data (204)", no_data_fetches)
+                    with col3:
+                        st.metric("❌ Errors", failed_fetches)
+                    
+                    if no_data_fetches > 0:
+                        st.info(f"ℹ️ {no_data_fetches} ISRCs returned 204 (no data for this time period). This is normal - the ISRC exists but has no streaming data for the requested date range.")
+                        no_data_isrcs = [isrc for isrc, data in api_data.items() if isinstance(data, dict) and len(data) == 0]
+                        if no_data_isrcs:
+                            with st.expander(f"ℹ️ ISRCs with No Data ({len(no_data_isrcs)})", expanded=False):
+                                st.write(", ".join(no_data_isrcs[:20]))
+                                if len(no_data_isrcs) > 20:
+                                    st.write(f"... and {len(no_data_isrcs) - 20} more")
+                                st.info("💡 **Note:** 204 means the ISRC was found but has no data for this time period. Try adjusting the date range or removing location filter.")
                     
                     if failed_fetches > 0:
-                        st.warning(f"⚠️ {failed_fetches} out of {len(api_data)} ISRCs failed to fetch data. Check **Error Log** tab for details.")
+                        st.warning(f"⚠️ {failed_fetches} out of {len(api_data)} ISRCs had errors. Check **Error Log** tab for details.")
                         # Show which ISRCs failed
                         failed_isrcs = [isrc for isrc, data in api_data.items() if data is None]
                         if failed_isrcs:
@@ -432,7 +458,7 @@ def main():
                                 st.write(", ".join(failed_isrcs[:20]))
                                 if len(failed_isrcs) > 20:
                                     st.write(f"... and {len(failed_isrcs) - 20} more")
-                                st.info("💡 **Note:** If these ISRCs show data on the web, the issue may be with date range or location filters. Check Error Log for details.")
+                                st.warning("💡 **Note:** These are actual errors (404, 500, etc.). Check Error Log for details.")
                     
                     # Debug: Show sample API response
                     sample_isrc = isrcs[0] if isrcs else None

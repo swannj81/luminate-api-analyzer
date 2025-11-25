@@ -146,9 +146,10 @@ class LuminateAPIClient:
         url = f"{self.base_url}/musical_recordings/{isrc}"
         
         # Add query parameters if provided (for date ranges, filters, etc.)
-        # CRITICAL: Must specify ID_Type=ISRC, otherwise API assumes "luminate" ID type
+        # CRITICAL: Must specify id_type=isrc, otherwise API assumes "luminate" ID type
+        # Per Luminate support: Use lowercase 'id_type' and 'isrc'
         params = {
-            'ID_Type': 'ISRC'  # Explicitly specify we're querying by ISRC
+            'id_type': 'isrc'  # Explicitly specify we're querying by ISRC (lowercase per Luminate)
         }
         
         # Only add parameters if they have actual values (not None or empty string)
@@ -175,12 +176,12 @@ class LuminateAPIClient:
                 data = response.json()
                 return data
             elif response.status_code == 204:
-                # 204 No Content - but user reports data exists on web
-                # This might indicate a parameter issue or API problem
-                print(f"   ⚠️ 204 No Content for ISRC {isrc} - but data may exist on web")
-                print(f"   This might indicate: date range issue, location filter, or API parameter problem")
-                # Return None to indicate error (not empty dict)
-                return None
+                # 204 No Content - ISRC found but no data for the specified time period
+                # Per Luminate: "204 means the code was found but did not have any data for that week"
+                # This is a valid response - the ISRC exists but has no streaming data for the requested period
+                print(f"   ℹ️ 204 No Content for ISRC {isrc} - ISRC found but no data for this time period")
+                # Return empty dict to indicate no data (not an error)
+                return {}
             elif response.status_code == 401:
                 # Token expired, try re-authenticating
                 print(f"⚠️ 401 Unauthorized for {isrc} - attempting re-authentication...")
@@ -218,7 +219,7 @@ class LuminateAPIClient:
                 retry_success = False
                 if params.get('start_date') or params.get('end_date') or params.get('location'):
                     print(f"   ⚠️ Retrying without date/location parameters...")
-                    minimal_params = {'ID_Type': 'ISRC'}
+                    minimal_params = {'id_type': 'isrc'}  # Use lowercase per Luminate support
                     retry_response = requests.get(url, headers=self.headers, params=minimal_params, timeout=30)
                     print(f"   Retry Status: {retry_response.status_code}")
                     if retry_response.status_code == 200:
@@ -232,17 +233,19 @@ class LuminateAPIClient:
                         except:
                             print(f"   Retry error text: {retry_response.text[:200]}")
                     else:
-                        # Still 500, try different ID_Type parameter formats
-                        print(f"   ⚠️ Still 500, trying alternative ID_Type parameter formats...")
-                        for param_name in ['id_type', 'idType', 'ID_TYPE']:
-                            alt_params = {param_name: 'ISRC'}
-                            alt_response = requests.get(url, headers=self.headers, params=alt_params, timeout=30)
-                            if alt_response.status_code == 200:
-                                print(f"   ✅ Success with {param_name} parameter!")
-                                return alt_response.json()
-                            elif alt_response.status_code != 500:
-                                print(f"   {param_name} gave status {alt_response.status_code} (not 500)")
-                                break
+                        # Still 500, try different id_type parameter formats
+                        print(f"   ⚠️ Still 500, trying alternative id_type parameter formats...")
+                        for param_name in ['id_type', 'idType', 'ID_Type', 'ID_TYPE']:
+                            # Try both lowercase and uppercase values
+                            for value in ['isrc', 'ISRC']:
+                                alt_params = {param_name: value}
+                                alt_response = requests.get(url, headers=self.headers, params=alt_params, timeout=30)
+                                if alt_response.status_code == 200:
+                                    print(f"   ✅ Success with {param_name}={value} parameter!")
+                                    return alt_response.json()
+                                elif alt_response.status_code != 500:
+                                    print(f"   {param_name}={value} gave status {alt_response.status_code} (not 500)")
+                                    break
                 
                 return None
             else:
