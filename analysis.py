@@ -239,15 +239,61 @@ class ManipulationDetector:
             }
         
         # Extract free (ad-supported) and premium streams
-        ad_supported = streams_data.get('commercial_model_ad_supported', 0)
-        premium = streams_data.get('commercial_model_premium', 0)
+        # Try multiple possible field names (API may structure data differently)
+        ad_supported = 0
+        premium = 0
         
-        # Also check alternative naming
+        # Try different possible field name variations
+        possible_ad_names = [
+            'commercial_model_ad_supported',
+            'ad_supported',
+            'commercial_model_ad-supported',  # With hyphen
+            'free',
+            'ad_supported_streams',
+            'commercial_model_free'
+        ]
+        
+        possible_premium_names = [
+            'commercial_model_premium',
+            'premium',
+            'premium_streams',
+            'paid',
+            'commercial_model_paid'
+        ]
+        
+        # Find ad_supported value
+        for name in possible_ad_names:
+            if name in streams_data:
+                value = streams_data[name]
+                if isinstance(value, (int, float)) and value > 0:
+                    ad_supported = value
+                    break
+        
+        # Find premium value
+        for name in possible_premium_names:
+            if name in streams_data:
+                value = streams_data[name]
+                if isinstance(value, (int, float)) and value > 0:
+                    premium = value
+                    break
+        
+        # If we still don't have values, check all keys for debugging
         if ad_supported == 0 and premium == 0:
-            ad_supported = streams_data.get('ad_supported', 0)
-            premium = streams_data.get('premium', 0)
+            # Debug: print available keys
+            print(f"DEBUG: Available keys in streams_data: {list(streams_data.keys())}")
+            print(f"DEBUG: Total streams: {total_streams}")
+            # Try to find any commercial_model related data
+            for key, value in streams_data.items():
+                if 'ad' in key.lower() or 'free' in key.lower():
+                    print(f"DEBUG: Found potential ad/free key: {key} = {value}")
+                if 'premium' in key.lower() or 'paid' in key.lower():
+                    print(f"DEBUG: Found potential premium/paid key: {key} = {value}")
         
+        # Calculate free ratio
         free_ratio = ad_supported / total_streams if total_streams > 0 else 0
+        
+        # Debug output
+        print(f"DEBUG Free Service Check: ad_supported={ad_supported}, premium={premium}, total={total_streams}, free_ratio={free_ratio:.2%}")
         
         # Flag conditions
         all_free = free_ratio >= self.free_max_threshold
