@@ -174,18 +174,49 @@ class ManipulationDetector:
             }
         
         # Check for DMA data in various possible locations
+        # Try multiple field name variations
         dma_data = None
-        if 'dma' in streams_data:
-            dma_data = streams_data['dma']
-        elif 'location_dma' in streams_data:
-            dma_data = streams_data['location_dma']
+        possible_dma_keys = [
+            'dma',
+            'location_dma',
+            'dma_location',
+            'location_dma_location',
+            'geographic_dma',
+            'dma_breakdown',
+            'location_breakdown'
+        ]
+        
+        for key in possible_dma_keys:
+            if key in streams_data:
+                dma_data = streams_data[key]
+                print(f"DEBUG: Found DMA data in key '{key}'")
+                break
+        
+        # Also check for nested location data
+        if not dma_data:
+            # Check if there's a location field that might contain DMA
+            if 'location' in streams_data:
+                location_data = streams_data['location']
+                if isinstance(location_data, dict):
+                    # Check if location dict contains DMA data
+                    for loc_key in ['dma', 'dma_breakdown', 'markets']:
+                        if loc_key in location_data:
+                            dma_data = location_data[loc_key]
+                            print(f"DEBUG: Found DMA data in location.{loc_key}")
+                            break
         
         if not dma_data:
+            # Debug: print available keys to help identify DMA data
+            print(f"DEBUG DMA Check: Available keys in streams_data: {list(streams_data.keys())}")
+            print(f"DEBUG DMA Check: Total streams: {total_streams}")
             # If DMA data isn't in the response, we can't check this
             return {
                 'flagged': False,
                 'reason': 'DMA data not available in response',
-                'details': None
+                'details': {
+                    'available_keys': list(streams_data.keys()),
+                    'total_streams': total_streams
+                }
             }
         
         # Find the DMA with the highest percentage
@@ -194,22 +225,45 @@ class ManipulationDetector:
         
         if isinstance(dma_data, dict):
             for dma_name, dma_streams in dma_data.items():
-                if isinstance(dma_streams, (int, float)):
+                if isinstance(dma_streams, (int, float)) and dma_streams > 0:
                     share = dma_streams / total_streams if total_streams > 0 else 0
                     if share > max_dma_share:
                         max_dma_share = share
                         max_dma_name = dma_name
+        elif isinstance(dma_data, list):
+            # Handle case where DMA data is a list of objects
+            for item in dma_data:
+                if isinstance(item, dict):
+                    dma_name = item.get('name') or item.get('dma') or item.get('market')
+                    dma_streams = item.get('value') or item.get('streams') or item.get('count')
+                    if dma_name and isinstance(dma_streams, (int, float)) and dma_streams > 0:
+                        share = dma_streams / total_streams if total_streams > 0 else 0
+                        if share > max_dma_share:
+                            max_dma_share = share
+                            max_dma_name = dma_name
+        
+        print(f"DEBUG DMA Check: max_dma_share={max_dma_share:.2%}, max_dma_name={max_dma_name}, threshold={self.dma_threshold:.2%}")
         
         # Flag if over threshold
         flagged = max_dma_share > self.dma_threshold
         
+        # Create detailed reason message
+        if flagged and max_dma_name:
+            reason = f'{max_dma_share*100:.1f}% of streams from DMA: {max_dma_name} (threshold: {self.dma_threshold*100:.0f}%)'
+        elif flagged:
+            reason = f'{max_dma_share*100:.1f}% of streams from single DMA (threshold: {self.dma_threshold*100:.0f}%)'
+        else:
+            reason = f'DMA distribution normal (max: {max_dma_share*100:.1f}% from {max_dma_name or "unknown"})'
+        
         return {
             'flagged': flagged,
-            'reason': f'{max_dma_share*100:.1f}% of streams from {max_dma_name}' if flagged else 'DMA distribution normal',
+            'reason': reason,
             'details': {
                 'max_dma_share': max_dma_share,
+                'max_dma_percentage': max_dma_share * 100,
                 'max_dma_name': max_dma_name,
-                'threshold': self.dma_threshold
+                'threshold': self.dma_threshold,
+                'threshold_percentage': self.dma_threshold * 100
             }
         }
     
@@ -431,11 +485,20 @@ class ManipulationDetector:
         
         for isrc, api_response in isrc_data.items():
             analysis = self.analyze_isrc(isrc, api_response)
+            
+            # Extract DMA info if available
+            dma_info = ""
+            if 'dma' in analysis['details']:
+                dma_details = analysis['details']['dma']
+                if dma_details and dma_details.get('max_dma_name'):
+                    dma_info = f"{dma_details.get('max_dma_name', 'Unknown')}: {dma_details.get('max_dma_percentage', 0):.1f}%"
+            
             results.append({
                 'ISRC': isrc,
                 'Flagged': analysis['total_flags'] > 0,
                 'Flag Count': analysis['total_flags'],
                 'Flags': '; '.join([f['message'] for f in analysis['flags']]) if analysis['flags'] else 'None',
+                'DMA Info': dma_info if dma_info else 'N/A',
                 'Details': str(analysis['details'])
             })
         
