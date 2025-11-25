@@ -142,31 +142,43 @@ class ManipulationDetector:
         result = {}
         
         for item in value_list:
-            name = item.get('name', '').lower()  # Normalize to lowercase for matching
+            name = item.get('name', '')
+            name_lower = name.lower()  # Normalize to lowercase for matching
             value = item.get('value')
             
             if isinstance(value, list):
                 # Nested structure - recurse
                 nested = self._parse_metrics(value)
+                
+                # Special handling for DMA/location data
+                if 'dma' in name_lower:
+                    # If this is a DMA node, try to extract DMA data directly
+                    # DMA data might be structured as: {"name": "dma", "value": [{"name": "New York", "value": 1000}, ...]}
+                    dma_dict = {}
+                    for nested_item in value:
+                        if isinstance(nested_item, dict):
+                            nested_name = nested_item.get('name', '')
+                            nested_value = nested_item.get('value', 0)
+                            if isinstance(nested_value, (int, float)):
+                                dma_dict[nested_name] = nested_value
+                    
+                    if dma_dict:
+                        # Store DMA data as a dictionary
+                        result['dma'] = dma_dict
+                        result['location_dma'] = dma_dict  # Also store with location prefix
+                        print(f"DEBUG: Extracted DMA data with {len(dma_dict)} DMAs: {list(dma_dict.keys())[:5]}")
+                
+                # Also store nested data with prefixes for other structures
                 for key, val in nested.items():
-                    # Preserve original name for top-level keys
-                    original_name = item.get('name', '')
-                    if 'dma' in name or 'location' in name:
-                        # For DMA/location data, preserve structure better
-                        if 'dma' in key.lower() or isinstance(val, dict):
-                            # Store DMA data directly
-                            result[key] = val
-                            # Also store with location prefix if needed
-                            if 'location' in name:
-                                result[f"location_{key}"] = val
-                        else:
-                            result[f"{original_name}_{key}"] = val
+                    if 'dma' in key.lower() and isinstance(val, dict):
+                        # If nested parsing found DMA data, use it
+                        result['dma'] = val
+                        result['location_dma'] = val
                     else:
-                        result[f"{original_name}_{key}"] = val
+                        result[f"{name}_{key}"] = val
             else:
                 # Leaf node - store the value
-                original_name = item.get('name', '')
-                result[original_name] = value
+                result[name] = value
         
         return result
     
