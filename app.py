@@ -480,7 +480,9 @@ def main():
                     failed_fetches = sum(1 for v in api_data.values() if v is None)
                     
                     # Always show debug panel
+                    st.markdown("---")
                     st.markdown("### 🔍 Debug Information")
+                    st.info("💡 **Debug section is below** - Scroll down to see raw API response, extracted data, and DMA analysis details")
                     
                     # Show fetch statistics
                     col1, col2, col3 = st.columns(3)
@@ -512,27 +514,60 @@ def main():
                                     st.write(f"... and {len(failed_isrcs) - 20} more")
                                 st.warning("💡 **Note:** These are actual errors (404, 500, etc.). Check Error Log for details.")
                     
-                    # Debug: Show sample API response
+                    # Debug: Show sample API response and extracted data
                     sample_isrc = isrcs[0] if isrcs else None
                     if sample_isrc:
-                        with st.expander("🔍 Debug: View Sample API Response", expanded=False):
+                        with st.expander("🔍 Debug: View Sample API Response", expanded=True):
                             sample_data = api_data.get(sample_isrc)
                             if sample_data:
                                 st.markdown(f"**ISRC: {sample_isrc}**")
+                                
+                                # Show raw API response
+                                st.markdown("**1. Raw API Response:**")
                                 st.json(sample_data)
                                 
                                 # Also show what the analysis module sees
                                 st.markdown("---")
-                                st.markdown("**Extracted Streams Data:**")
+                                st.markdown("**2. Extracted Streams Data:**")
                                 streams_data = st.session_state.detector.extract_streams_data(sample_data)
                                 if streams_data:
                                     st.json(streams_data)
+                                    
+                                    # Specifically show DMA-related keys
+                                    st.markdown("---")
+                                    st.markdown("**3. DMA-Related Keys Found:**")
+                                    dma_keys = [k for k in streams_data.keys() if 'dma' in k.lower() or 'location' in k.lower() or 'market' in k.lower() or 'geographic' in k.lower()]
+                                    if dma_keys:
+                                        st.success(f"✅ Found {len(dma_keys)} DMA-related keys:")
+                                        for key in dma_keys:
+                                            value = streams_data[key]
+                                            st.text(f"  - {key}: {type(value).__name__}")
+                                            if isinstance(value, dict):
+                                                st.text(f"    Keys: {list(value.keys())[:10]}")
+                                            elif isinstance(value, list):
+                                                st.text(f"    Length: {len(value)} items")
+                                            else:
+                                                st.text(f"    Value: {str(value)[:100]}")
+                                    else:
+                                        st.warning("⚠️ No DMA-related keys found in extracted data")
+                                        st.info("💡 Available keys: " + ", ".join(list(streams_data.keys())[:20]))
+                                    
+                                    # Show DMA check result
+                                    st.markdown("---")
+                                    st.markdown("**4. DMA Concentration Check:**")
+                                    from analysis import ManipulationDetector
+                                    temp_detector = ManipulationDetector()
+                                    dma_check = temp_detector.check_dma_concentration(sample_data)
+                                    st.json(dma_check)
+                                    
                                 else:
                                     st.error("❌ Could not extract streams data from this response")
                                     st.info("💡 This might mean the API response structure is different than expected. Check the raw response above.")
                             else:
                                 st.error(f"❌ No data returned for ISRC: {sample_isrc}")
                                 st.info("💡 Check terminal for error messages about this ISRC")
+                                
+                        st.info("💡 **Tip**: Check your terminal/console for detailed DEBUG output showing what DMA data was found (or not found)")
                     
                     results_df = st.session_state.detector.analyze_batch(api_data)
                     
