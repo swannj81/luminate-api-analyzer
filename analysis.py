@@ -100,6 +100,8 @@ class ManipulationDetector:
                 break
         
         if not streams_metric:
+            # Debug: print available metrics
+            print(f"DEBUG: Available metrics: {[m.get('name', 'unknown') for m in metrics if isinstance(m, dict)]}")
             return None
         
         value = streams_metric.get('value', [])
@@ -107,7 +109,26 @@ class ManipulationDetector:
             # If value is not a list, wrap it
             value = [value] if value is not None else []
         
-        return self._parse_metrics(value)
+        # Parse the streams data
+        parsed_data = self._parse_metrics(value)
+        
+        # Also check if there's location/DMA data in other metrics
+        # Sometimes DMA data might be in a separate metric
+        for metric in metrics:
+            if not isinstance(metric, dict):
+                continue
+            metric_name = metric.get('name', '').lower()
+            if 'location' in metric_name or 'geographic' in metric_name or 'market' in metric_name or 'dma' in metric_name:
+                location_value = metric.get('value', [])
+                if isinstance(location_value, list):
+                    location_parsed = self._parse_metrics(location_value)
+                    # Merge location data into parsed_data
+                    for key, val in location_parsed.items():
+                        if 'dma' in key.lower() or 'location' in key.lower():
+                            parsed_data[key] = val
+                    print(f"DEBUG: Found location/geographic metric '{metric.get('name')}', merged into parsed_data")
+        
+        return parsed_data
     
     def _parse_metrics(self, value_list: List[Dict]) -> Dict[str, Any]:
         """
@@ -274,6 +295,23 @@ class ManipulationDetector:
             # Debug: print available keys to help identify DMA data
             print(f"DEBUG DMA Check: Available keys in streams_data: {list(streams_data.keys())}")
             print(f"DEBUG DMA Check: Total streams: {total_streams}")
+            # Print sample of data structure for keys that might contain DMA
+            for key in streams_data.keys():
+                if 'location' in key.lower() or 'dma' in key.lower() or 'geographic' in key.lower() or 'market' in key.lower():
+                    value = streams_data[key]
+                    print(f"DEBUG DMA Check: Key '{key}' = {type(value)}")
+                    if isinstance(value, dict):
+                        print(f"DEBUG DMA Check:   Dict keys: {list(value.keys())[:10]}")
+                        # Print a sample of the dict values
+                        sample_items = list(value.items())[:5]
+                        for k, v in sample_items:
+                            print(f"DEBUG DMA Check:     {k}: {v}")
+                    elif isinstance(value, list) and len(value) > 0:
+                        print(f"DEBUG DMA Check:   List length: {len(value)}")
+                        print(f"DEBUG DMA Check:   List item sample: {value[0] if len(value) > 0 else 'empty'}")
+                    else:
+                        print(f"DEBUG DMA Check:   Value sample: {str(value)[:200]}")
+            
             # If DMA data isn't in the response, we can't check this
             return {
                 'flagged': False,
