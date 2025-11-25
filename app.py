@@ -14,9 +14,14 @@ Key Concepts:
 import streamlit as st
 import pandas as pd
 import time
+import hashlib
+import os
 from typing import Dict, List, Optional
 from luminate_client import LuminateAPIClient
 from analysis import ManipulationDetector
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Page configuration
 st.set_page_config(
@@ -25,7 +30,54 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize session state
+# Authentication Configuration
+# Store credentials in environment variables for security
+APP_USERNAME = os.getenv('APP_USERNAME', 'admin')
+APP_PASSWORD_HASH = os.getenv('APP_PASSWORD_HASH', '')
+
+# Default password hash (CHANGE THIS IN PRODUCTION!)
+# To generate: hashlib.sha256("your_password".encode()).hexdigest()
+DEFAULT_PASSWORD_HASH = hashlib.sha256('Luminate2025!'.encode()).hexdigest()
+
+if not APP_PASSWORD_HASH:
+    APP_PASSWORD_HASH = DEFAULT_PASSWORD_HASH
+
+def check_password(password: str) -> bool:
+    """Check if the provided password matches the stored hash."""
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    return password_hash == APP_PASSWORD_HASH
+
+def show_login():
+    """Display login form."""
+    st.title("🔐 Luminate API Analyzer - Login")
+    st.markdown("Please enter your credentials to access the application.")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.form("login_form"):
+            username = st.text_input("Username", placeholder="Enter username")
+            password = st.text_input("Password", type="password", placeholder="Enter password")
+            submit = st.form_submit_button("Login", type="primary")
+            
+            if submit:
+                if username == APP_USERNAME and check_password(password):
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid username or password")
+    
+    st.markdown("---")
+    st.info("💡 **Note**: Contact your administrator for login credentials.")
+
+# Authentication check
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    show_login()
+    st.stop()
+
+# Initialize session state (only after authentication)
 # Session state persists data across user interactions (like a database for the session)
 if 'api_client' not in st.session_state:
     st.session_state.api_client = None
