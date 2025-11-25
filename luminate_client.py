@@ -174,6 +174,55 @@ class LuminateAPIClient:
             
             if response.status_code == 200:
                 data = response.json()
+                
+                # Check if we got breakdown data (commercial_model, location, etc.)
+                # If not, and we used location filter, try again without location
+                has_breakdowns = False
+                if data and 'metrics' in data:
+                    for metric in data['metrics']:
+                        if metric.get('name') == 'Streams':
+                            value = metric.get('value', [])
+                            if isinstance(value, list):
+                                # Check if we have more than just "total"
+                                for item in value:
+                                    if isinstance(item, dict):
+                                        name = item.get('name', '').lower()
+                                        if name not in ['total', 'streams']:
+                                            has_breakdowns = True
+                                            break
+                
+                # If no breakdowns and we filtered by location, try without location to get DMA data
+                if not has_breakdowns and request_with_location:
+                    print(f"   ⚠️ No breakdowns found with location filter. Retrying without location to get DMA/commercial_model data...")
+                    params_without_location = {'id_type': 'isrc'}
+                    if params.get('start_date'):
+                        params_without_location['start_date'] = params['start_date']
+                    if params.get('end_date'):
+                        params_without_location['end_date'] = params['end_date']
+                    
+                    retry_response = requests.get(url, headers=self.headers, params=params_without_location, timeout=30)
+                    if retry_response.status_code == 200:
+                        retry_data = retry_response.json()
+                        # Check if retry has breakdowns
+                        retry_has_breakdowns = False
+                        if retry_data and 'metrics' in retry_data:
+                            for metric in retry_data['metrics']:
+                                if metric.get('name') == 'Streams':
+                                    value = metric.get('value', [])
+                                    if isinstance(value, list):
+                                        for item in value:
+                                            if isinstance(item, dict):
+                                                name = item.get('name', '').lower()
+                                                if name not in ['total', 'streams']:
+                                                    retry_has_breakdowns = True
+                                                    break
+                        
+                        if retry_has_breakdowns:
+                            print(f"   ✅ Got breakdowns without location filter! Using this data.")
+                            return retry_data
+                        else:
+                            print(f"   ⚠️ Still no breakdowns without location. Using original response.")
+                
                 return data
             elif response.status_code == 204:
                 # 204 No Content - ISRC found but no data for the specified time period
