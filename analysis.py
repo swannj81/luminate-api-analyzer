@@ -126,23 +126,47 @@ class ManipulationDetector:
             {"name": "premium", "value": 500000}
           ]
         }
+        or
+        {
+          "name": "location",
+          "value": [
+            {"name": "dma", "value": [
+              {"name": "New York", "value": 500000},
+              {"name": "Los Angeles", "value": 300000}
+            ]}
+          ]
+        }
         
         This function flattens this into a simple dictionary.
         """
         result = {}
         
         for item in value_list:
-            name = item.get('name')
+            name = item.get('name', '').lower()  # Normalize to lowercase for matching
             value = item.get('value')
             
             if isinstance(value, list):
                 # Nested structure - recurse
                 nested = self._parse_metrics(value)
                 for key, val in nested.items():
-                    result[f"{name}_{key}"] = val
+                    # Preserve original name for top-level keys
+                    original_name = item.get('name', '')
+                    if 'dma' in name or 'location' in name:
+                        # For DMA/location data, preserve structure better
+                        if 'dma' in key.lower() or isinstance(val, dict):
+                            # Store DMA data directly
+                            result[key] = val
+                            # Also store with location prefix if needed
+                            if 'location' in name:
+                                result[f"location_{key}"] = val
+                        else:
+                            result[f"{original_name}_{key}"] = val
+                    else:
+                        result[f"{original_name}_{key}"] = val
             else:
                 # Leaf node - store the value
-                result[name] = value
+                original_name = item.get('name', '')
+                result[original_name] = value
         
         return result
     
@@ -174,7 +198,7 @@ class ManipulationDetector:
             }
         
         # Check for DMA data in various possible locations
-        # Try multiple field name variations
+        # Try multiple field name variations (case-insensitive)
         dma_data = None
         possible_dma_keys = [
             'dma',
@@ -183,27 +207,56 @@ class ManipulationDetector:
             'location_dma_location',
             'geographic_dma',
             'dma_breakdown',
-            'location_breakdown'
+            'location_breakdown',
+            'location_dma_dma',  # Nested parsing might create this
+            'location_dma_location_dma'
         ]
         
+        # First, try exact key matches (case-sensitive)
         for key in possible_dma_keys:
             if key in streams_data:
                 dma_data = streams_data[key]
-                print(f"DEBUG: Found DMA data in key '{key}'")
+                print(f"DEBUG: Found DMA data in key '{key}' (type: {type(dma_data)})")
                 break
+        
+        # If not found, try case-insensitive search
+        if not dma_data:
+            streams_data_lower = {k.lower(): v for k, v in streams_data.items()}
+            for key in possible_dma_keys:
+                if key.lower() in streams_data_lower:
+                    # Find the original key (case-preserved)
+                    original_key = next((k for k in streams_data.keys() if k.lower() == key.lower()), None)
+                    if original_key:
+                        dma_data = streams_data[original_key]
+                        print(f"DEBUG: Found DMA data in key '{original_key}' (case-insensitive match)")
+                        break
         
         # Also check for nested location data
         if not dma_data:
             # Check if there's a location field that might contain DMA
-            if 'location' in streams_data:
-                location_data = streams_data['location']
+            location_keys = [k for k in streams_data.keys() if 'location' in k.lower()]
+            for loc_key in location_keys:
+                location_data = streams_data[loc_key]
                 if isinstance(location_data, dict):
                     # Check if location dict contains DMA data
-                    for loc_key in ['dma', 'dma_breakdown', 'markets']:
-                        if loc_key in location_data:
-                            dma_data = location_data[loc_key]
-                            print(f"DEBUG: Found DMA data in location.{loc_key}")
+                    for dma_key in ['dma', 'dma_breakdown', 'markets', 'dma_location']:
+                        if dma_key in location_data:
+                            dma_data = location_data[dma_key]
+                            print(f"DEBUG: Found DMA data in {loc_key}.{dma_key}")
                             break
+                    if dma_data:
+                        break
+                elif isinstance(location_data, list):
+                    # Location might be a list of DMA objects
+                    print(f"DEBUG: Found location as list with {len(location_data)} items")
+                    # Check if list items contain DMA data
+                    for item in location_data:
+                        if isinstance(item, dict) and ('dma' in str(item).lower() or 'market' in str(item).lower()):
+                            dma_data = location_data
+                            print(f"DEBUG: Found DMA data in location list")
+                            break
+                    if dma_data:
+                        break
         
         if not dma_data:
             # Debug: print available keys to help identify DMA data
